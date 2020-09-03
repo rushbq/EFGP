@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project-modules id="moduleCoreId" project-version="1.5.0">
+    <wb-module deploy-name="zEARForPURMI07_Mail">
+        <wb-resource deploy-path="/" source-path="/EarContent"/>
+        <dependent-module archiveName="EJBForPURMI07_Mail.jar" deploy-path="/" handle="module:/resource/EJBForPURMI07_Mail/EJBForPURMI07_Mail">
+            <dependent-object>EjbModule_1518417348742</dependent-object>
+            <dependency-type>uses</dependency-type>
+        </dependent-module>
+    </wb-module>
+</project-modules>

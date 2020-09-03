@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="src" path="ejbModule"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/jdk1.6.0_41">
+		<attributes>
+			<attribute name="owner.project.facets" value="java"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="con" path="org.eclipse.jst.server.core.container/org.eclipse.jst.server.generic.runtimeTarget/JBoss v4.2">
+		<attributes>
+			<attribute name="owner.project.facets" value="jst.ejb"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="con" path="org.eclipse.jst.j2ee.internal.module.container"/>
+	<classpathentry kind="lib" path="D:/_MyWork/EFGP/jboss-4.2.3.GA/server/default/deploy/NaNaWeb.war/WEB-INF/lib/axis.jar"/>
+	<classpathentry kind="lib" path="D:/_MyWork/EFGP/jboss-4.2.3.GA/server/default/deploy/NaNaWeb.war/WEB-INF/lib/nana-services-client.jar"/>
+	<classpathentry kind="output" path="build/classes"/>
+</classpath>
