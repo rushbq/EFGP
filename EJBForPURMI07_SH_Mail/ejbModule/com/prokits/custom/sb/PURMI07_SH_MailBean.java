@@ -3,13 +3,18 @@
  */
 package com.prokits.custom.sb;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.rmi.RemoteException;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -35,6 +40,7 @@ import javax.mail.internet.MimeMultipart;
 import javax.naming.Context;
 import javax.naming.InitialContext;
 import javax.sql.DataSource;
+
 
 import com.dsc.nana.domain.form.FormInstance;
 import com.dsc.nana.services.exception.ServiceException;
@@ -121,13 +127,8 @@ public abstract class PURMI07_SH_MailBean implements javax.ejb.SessionBean {
 	 * //TODO: Must provide implementation for bean method stub
 	 */
 	public void sendPDF(FormInstance tFormInstance) {
-		System.out.println("--- 開始發送郵件,PDF Mail ---");
-
-		//宣告SMTP參數
-		String host = "smtp.prokits.com.tw";
-		String port = "25";
-		String mailFrom = "pkmailman";
-		String password = "PK!@#mail";
+		//~Response
+		System.out.println("--- 開始發送郵件,PDF Mail (SH-PURMI07)---");
 
 		//取得表單欄位的值(使用fetchFieldValue)
 		String mainID = tFormInstance.fetchFieldValue("TC001"); // 單別
@@ -141,14 +142,15 @@ public abstract class PURMI07_SH_MailBean implements javax.ejb.SessionBean {
 		String purEmail = tFormInstance.fetchFieldValue("TC011EMail"); // 採購EMAIL
 		String createrMail = tFormInstance.fetchFieldValue("txt_CreaterMail");	//填單人EMAIL
 		String lang = tFormInstance.fetchFieldValue("TC012"); // 中文:1 / 英文:2
-		String supMail = ""; // 廠商Mail
+		String supMail = ""; // 廠商Mail(至PKSYS取得完整mail)
 		//String signerMail = tFormInstance.fetchFieldValue("txt_LastSignEmail"); // 最後簽核者Mail (不寄給簽核者)
 		String fullMailTo = "";// 完整收件人清單
-		Boolean sendToSup = true;
-
-		//取得PDF檔案名稱
-		String pdfName = mainID + subID + ".pdf";
-
+		Boolean sendToSup = true; //是否發信給廠商
+		
+		
+		/* ------ 資料處理 S ------ */
+		
+		//[廠商Mail]
 		//判斷:若採購類型符合條件，不發送給廠商(設變/新品)
 		if (poType.equals("E") || poType.equals("F") || poType.equals("G") || poType.equals("H")) {
 			sendToSup = false;
@@ -164,83 +166,137 @@ public abstract class PURMI07_SH_MailBean implements javax.ejb.SessionBean {
 				//取MAP
 				Map.Entry entry = (Map.Entry) iter.next();
 
+				//key為email address
 				supMail += entry.getKey() + ";";
 				// System.out.println("---Show Result---" + entry.getKey() + "__" + entry.getValue());
 			}
 		}
 		
-	
-		//建立收件人清單(上海採購群組/供應商/採購/填單人)
-		//採購Mail空白 & 採購<>填單 -> 帶採購Mail
-		fullMailTo = "sh_purchase@mail.prokits.com.tw;" + supMail + ((!purEmail.equals("") && !purEmail.equals(createrMail))?purEmail + ";" : "") + createrMail;
-		//fullMailTo = "clyde@mail.prokits.com.tw";  //for test 20200218
+		//取得採購人員資料(From PKSYS)
+		//Tel, TelExt
+		String tel = "";
+		String telExt = "";
+		String email = "";
+		List purInfo = GetPurManInfo(purNameID);
+		
+		//~Response
+		//System.out.println("GetPurManInfo count: " + purInfo.size());
+		//foreach
+		if(purInfo.size() > 0){
+			for (int row = 0; row < purInfo.size(); row++) {
+				Map item = (Map)purInfo.get(row);				
+				
+				tel = (String)item.get("Tel");
+				telExt = (String)item.get("Ext");
+				email = (String)item.get("Email");
+							
+	        	//System.out.println("PurInfo:" + email + "_" + tel + "_" + telExt);
+	        }
+		}
+		
+		//[Mail Html]
+		//Html路徑(HTML檔案必須轉成 檔首無BOM)
+		String htmlName = lang.equals("1") ? "Mail_CN.html" : "Mail_EN.html";
+		String url = "http://cdn.prokits.com.tw/BPM/PURMI07/" + htmlName;
 
+		//~Response
+		System.out.println("Get Mail Html:" + url);
+		
+		//設定郵件內容Html(Html內容只允許body)
+		String mailBody = GetHtml(url);
+		if(mailBody == ""){
+			//~Response
+			System.out.println("無法取得Mail Html : " + url);			
+			return;
+		}
+				
+		
+		//通用title
+		String poTitle =  mainID + "-" + subID + "(" + supName + ")";
+		//set year
+		String year = String.valueOf(Calendar.getInstance().get(Calendar.YEAR));
+		
+		//取代Html會變動的內容
+		mailBody = mailBody.replace("#subject#", poTitle);
+		mailBody = mailBody.replace("#今年#", year);
+		mailBody = mailBody.replace("#supName#", supName);
+		mailBody = mailBody.replace("#Who#", lang.equals("1") ? purName : purNameEn);
+		mailBody = mailBody.replace("#Mail#", email);
+		mailBody = mailBody.replace("#Tel#", tel);
+		mailBody = mailBody.replace("#Ext#", telExt);
+
+		//~Response
+		//System.out.println("mailBody:" + mailBody);
+		
+		//[收件人名單]
+		//建立收件人清單(上海採購群組/供應商/採購/填單人)
+		//採購Mail空白 & 採購不等於填單 -> 帶採購Mail
+		fullMailTo = "sh_purchase@mail.prokits.com.tw;" + supMail + ((!purEmail.equals("") && !purEmail.equals(createrMail))? purEmail + ";" : "") + createrMail;
+		//fullMailTo = "purchase@mail.prokits.com.tw;sh_purchase@mail.prokits.com.tw";  //for test
+		
+		/* ------ 資料處理 E ------ */
+		
+		/* ------ Mail處理 S ------ */
+		//宣告SMTP參數
+		String host = "smtp.prokits.com.tw";
+		String port = "25";
+		String mailFrom = "pkmailman";
+		String password = "PK!@#mail";
+		
 		//設定:收件人
 		String mailTo = fullMailTo;
 		
 		//設定:主旨/內文
 		String subject = "";
-		String message = "";
-		String footerImg = "";
-		
-		//判斷語系
+		String bodyMessage = mailBody;
 		if(lang.equals("1")){
-			//---中文---
-			subject = "上海宝工采购单 - " + mainID + "-" + subID + "(" + supName + ")";
-			message = "Dear " + supName + " 您好<br/><br/>"
-				+ "附件为我司新增的采购单，请确认交期后，<br/><span style=\"color:red\">用电子邮件全部回覆(勿单独回覆，以方便我们确认您有收到订单并已执行)</span><br/>有任何问题请与 采购部-" + purName + " (" + purEmail + ")" + " 联系，谢谢<br/><br/>"
-				+ "上海宝工采购部";
-			
-			footerImg = "<br/><br/><br/>**本电子邮件及附件所载信息均为保密信息，受合同保护或依法不得泄漏。切勿转寄、散布、复制或公开其内容。<br/>因误传而收到本邮件的收件人，请于误收此文件后，立即与本公司联络，并请删除邮件与此电子档，谢谢您的合作！**";
+			//---中文(CN)---
+			subject = "上海宝工采购单 - " + poTitle;
 			
 		}else{
 			//---英文---
-			subject = "From Prokits New P/O - " + mainID + "-" + subID + "(" + supName + ")";
-			message = "Dear " + supName + "<br/><br/>"
-				+ "Good day!<br/>Please find attached New Order, and please confirm and reply the delivery date.<br/>If there is any question, please contact with us. Thanks.<br/><br/>"
-				+ "Thanks & Best wishes,<br/>"
-				+ purNameEn + "<br/>" + purEmail;
-			
-			footerImg = "<br/><br/><br/>**本电子邮件及附件所载信息均为保密信息，受合同保护或依法不得泄漏。切勿转寄、散布、复制或公开其内容。<br/>因误传而收到本邮件的收件人，请于误收此文件后，立即与本公司联络，并请删除邮件与此电子档，谢谢您的合作！**";
+			subject = "From Prokits New P/O - " + poTitle;			
 		}
-
-
-		message += footerImg;
 		
-		System.out.println("subject:" + subject);
-		System.out.println("mailTo:" + mailTo);
+		//System.out.println("bodyMessage:" + bodyMessage);
+		//System.out.println("subject:" + subject);
+		//System.out.println("mailTo:" + mailTo);
 	
-
-		//宣告附件
+		//[附件處理]
 		String[] attachFiles = new String[1];
+		//取得PDF檔案名稱
+		String pdfName = mainID + subID + ".pdf";
+		
 		//設定:PDF完整路徑
 		attachFiles[0] = System.getProperty("jboss.home.dir")
 				+ "\\server\\default\\deploy\\NaNaWeb.war\\report\\iPURMI07_SH\\"
 				+ pdfName;
 
 		try {
-			if (fullMailTo == "") {
+			if (mailTo == "") {
 				System.out.println("--- 收件人清單空白無法發送 ---," + mainID + subID);
 			} else {
 				//採購人Mail空白,使用填單人Mail
 				if(purEmail.equals("")){
 					purEmail = createrMail;
 				}
-				//for test 20200218
-				//purEmail = "clyde@mail.prokits.com.tw";
 				
 				//send email
 				sendEmailWithAttachments(host, port
 						, mailFrom, password
 						, purEmail, mailTo
-						, subject, message, attachFiles);
-				System.out.println("--- 郵件已發送 ---");
+						, subject
+						, bodyMessage
+						, attachFiles);
+				System.out.println("--- 郵件已發送 ---," + mainID + subID);
 			}
 		} catch (Exception ex) {
 			System.out.println("--- 無法寄送郵件 ---");
 			ex.printStackTrace();
 			throw new ServiceException(ex);
 		}
+		
+		/* ------ Mail處理 E ------ */
 	}
 
 
@@ -249,7 +305,7 @@ public abstract class PURMI07_SH_MailBean implements javax.ejb.SessionBean {
 	private void sendEmailWithAttachments(String host, String port,
 			final String userName, final String password
 			, String purEmail, String toAddress
-			, String subject, String message, String[] attachFiles)
+			, String subject, String bodyMessage, String[] attachFiles)
 			throws AddressException, MessagingException {
 
 		// sets SMTP server properties
@@ -273,12 +329,13 @@ public abstract class PURMI07_SH_MailBean implements javax.ejb.SessionBean {
 
 			auth = null;
 
-			// creates a new e-mail message
+			//建立Email
 			MimeMessage msg = new MimeMessage(session);
-
-			msg.setFrom(new InternetAddress("pkmailman@mail.prokits.com.tw", "ProsKit Mail System")); // 寄件人
-
 			
+			//[設定]寄件人
+			msg.setFrom(new InternetAddress("pkmailman@mail.prokits.com.tw", "ProsKit Mail System")); 
+			
+			//[設定]收件人
 			//Array解析收件人(;)
 			String[] toAddrAry = toAddress.split(";");
 			//宣告暫存List
@@ -292,7 +349,6 @@ public abstract class PURMI07_SH_MailBean implements javax.ejb.SessionBean {
 					System.out.println("mailList("+ i +")==" + toAddrAry[i]);
 				}
 			}
-
 			//加入收件清單
 			InternetAddress[] toAddresses = new InternetAddress[listAddr.size()];
 			for (int row = 0; row < listAddr.size(); row++) {
@@ -300,27 +356,27 @@ public abstract class PURMI07_SH_MailBean implements javax.ejb.SessionBean {
 				toAddresses[row] = new InternetAddress(listAddr.get(row).toString());
 			}
 			
-			//設定收件人
+			//指定收件人
 			msg.setRecipients(Message.RecipientType.TO, toAddresses);
 			// msg.setRecipients(Message.RecipientType.CC, "");
 			
-			//Reply To(採購人員)
+			//[設定]Reply To(採購人員)
 			msg.setReplyTo(new InternetAddress[]{new InternetAddress(purEmail)});
 		
 
-			//設定主旨
+			//[設定]主旨
 			msg.setSubject(subject, "utf-8");
 			msg.setSentDate(new Date());
 
-			// creates message part
+			//[設定]內文
 			MimeBodyPart messageBodyPart = new MimeBodyPart();
-			messageBodyPart.setContent(message, "text/html;charset=utf-8"); // 內文
+			messageBodyPart.setContent(bodyMessage, "text/html;charset=utf-8"); //body
 
 			// creates multi-part
 			Multipart multipart = new MimeMultipart();
 			multipart.addBodyPart(messageBodyPart);
 
-			// adds attachments
+			//[設定]附件
 			if (attachFiles != null && attachFiles.length > 0) {
 				MimeBodyPart attachPart = new MimeBodyPart();
 
@@ -335,13 +391,13 @@ public abstract class PURMI07_SH_MailBean implements javax.ejb.SessionBean {
 				}
 			}
 
-			// sets the multi-part as e-mail's content
+			//加入附件 sets the multi-part as e-mail's content
 			msg.setContent(multipart); // 附件
 
-			// sends the e-mail
+			//發送郵件 sends the e-mail
 			Transport.send(msg);
 			
-			System.out.println("--Transport.send--");
+			//System.out.println("--Transport.send--");
 
 			msg = null;
 
@@ -355,9 +411,9 @@ public abstract class PURMI07_SH_MailBean implements javax.ejb.SessionBean {
 		}
 	}
 
-	// 取得廠商通訊錄Mail(PKSYS)
+	//取得廠商通訊錄(PKSYS)
 	private Map GetSupMail(String supID) {
-		System.out.println("--- 取得廠商通訊錄Mail Start ---");
+		System.out.println("--- 取得廠商通訊錄 Start ---");
 
 		// 取得DB連結
 		DataSource tPKDataSource = null;
@@ -376,7 +432,7 @@ public abstract class PURMI07_SH_MailBean implements javax.ejb.SessionBean {
 			// SQL
 			String sql = "";
 			sql += " SELECT Base.Email, Base.FullName, Base.Gender";
-			sql += " FROM PKSYS.dbo.Supplier_Members Base";
+			sql += " FROM [PKSYS].dbo.Supplier_Members Base";
 			sql += " WHERE (Base.ERP_ID = '" + supID + "') AND (Base.IsSendOrder = 'Y')";
 
 			// print sql
@@ -385,25 +441,24 @@ public abstract class PURMI07_SH_MailBean implements javax.ejb.SessionBean {
 			// 取得DB欄位值
 			String fullName = ""; // 全名
 			String email = ""; // Email
-			String gender = ""; // 性別
+			//String gender = ""; // 性別
 
 			// 執行SQL,取回結果
 			tPKResult = tPKStatement.executeQuery(sql);
 			while (tPKResult.next()) {
 				fullName = tPKResult.getString("FullName");
 				email = tPKResult.getString("Email");
-				gender = tPKResult.getString("Gender").equals("M") ? " 先生"
-						: " 小姐";
+				//gender = tPKResult.getString("Gender").equals("M") ? " 先生": " 小姐";
 
 				// Set Map
-				result.put(email, fullName + gender);
+				result.put(email, fullName);
 			}
 
-			System.out.println("--- 取得廠商通訊錄Mail End, ok ---");
+			System.out.println("--- 取得廠商通訊錄 End, ok ---");
 
 		} catch (Exception ex) {
 			ex.printStackTrace();
-			System.out.println("--- 取得廠商通訊錄Mail Error ---");
+			System.out.println("--- 取得廠商通訊錄 Error ---");
 			throw new ServiceException(ex);
 
 		} finally {
@@ -417,6 +472,121 @@ public abstract class PURMI07_SH_MailBean implements javax.ejb.SessionBean {
 		return result;
 	}
 
+	//取得採購人員通訊錄(PKSYS)
+	private List GetPurManInfo(String erpID) {
+		System.out.println("--- 取得採購人員Info Start ---");
+
+		// 取得DB連結
+		DataSource tPKDataSource = null;
+		Connection tPKConnection = null;
+		Statement tPKStatement = null;
+		ResultSet tPKResult = null;
+		
+		// 將MAP 寫入LIST
+		List myList = new ArrayList();
+		// 宣告MAP暫存
+		Map result = new HashMap();
+
+		try {
+			// 取得DB連線(查看nana_xxx.xml的<jndi-name>
+			tPKDataSource = getJndiDataSource("NaNaPKSYS");
+			tPKConnection = tPKDataSource.getConnection();
+			tPKStatement = tPKConnection.createStatement();
+
+			/*
+			 * 取得PKSYS人員資料
+			 * (ERP_UserID=PKEF.ERP員工代號)
+			 * */
+			String sql = "";
+			sql += " SELECT TOP 1 Display_Name, Email, NickName";
+			sql += " , ISNULL(Tel, '+886 2 2218-3233') Tel, ISNULL(Tel_Ext, '123') Tel_Ext";
+			sql += " FROM [PKSYS].dbo.User_Profile";
+			sql += " WHERE (ERP_UserID = '" + erpID + "')";
+			
+			//~Response
+			//System.out.println("採購人員Info SQL:" + sql);
+
+			// 取得DB欄位值
+			String Tel = "";
+			String Tel_Ext = "";
+			String email = "";
+
+			// 執行SQL,取回結果
+			tPKResult = tPKStatement.executeQuery(sql);
+			while (tPKResult.next()) {
+				Tel = tPKResult.getString("Tel");
+				Tel_Ext = tPKResult.getString("Tel_Ext");
+				email = tPKResult.getString("Email");
+
+				// Set Map
+				result.put("Tel", Tel);
+				result.put("Ext", Tel_Ext);
+				result.put("Email", email);
+				
+				//System.out.println("Map:" + Tel + "_" + Tel_Ext + "_" + email);
+				myList.add(result);
+			}
+
+			System.out.println("--- 取得採購人員Info End, ok ---");
+
+		} catch (Exception ex) {
+			ex.printStackTrace();
+			System.out.println("--- 取得採購人員Info Error ---");
+			throw new ServiceException(ex);
+
+		} finally {
+			// ** 重要 ** Release DB 連線
+			closeResultSet(tPKResult);
+			closeStmt(tPKStatement);
+			closeConn(tPKConnection);
+		}
+
+		// return map
+		return myList;
+	}
+
+	
+	//取得Mail Html
+	private String GetHtml(String url){
+		try{
+			//宣告url
+			URL obj = new URL(url);
+			//Url連線
+			HttpURLConnection con = (HttpURLConnection) obj.openConnection();
+			
+			//~Response
+			//System.out.println("URL : " + url);
+
+			//讀取串流
+			BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream(), "UTF-8"));
+			
+			//設定接收字串
+			StringBuffer response = new StringBuffer();
+			String inputLine;
+
+			//字串組合
+			while ((inputLine = in.readLine()) != null) {
+				response.append(inputLine);
+			}
+			
+			//關閉串流
+			in.close();
+			
+			return response.toString().replaceAll("\\s{2,}"," ");
+			
+		} catch (Exception ex) {
+			System.out.println("--- 無法取得Email Html Body ---");
+			ex.printStackTrace();
+			//throw new ServiceException(ex);
+			return "";
+			
+		} finally {
+			
+	
+		}
+		
+	}
+	
 
 	//檢查Email格式
 	private boolean isEmail(String email) {
